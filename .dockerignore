@@ -1,0 +1,27 @@
+node_modules
+**/node_modules
+dist
+**/dist
+build
+**/build
+.turbo
+**/.turbo
+
+.git
+.github
+.gitignore
+
+# Secrets must come from the runtime environment, never be baked into a layer.
+.env
+**/.env
+**/.env.*
+!**/.env.example
+
+*.md
+LICENSE
+Dockerfile
+.dockerignore
+
+# Build context: keep generated runtime secrets out of the image
+.env.docker
+scripts

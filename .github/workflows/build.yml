@@ -1,0 +1,46 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [main]
+
+env:
+  IMAGE: ghcr.io/hamzeus95/auth-app
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+
+      - name: Update platform repo with new image tag
+        env:
+          GH_TOKEN: ${{ secrets.PLATFORM_REPO_TOKEN }}
+        run: |
+          git clone https://x-access-token:${GH_TOKEN}@github.com/HamZeus95/platform.git /tmp/platform
+          cd /tmp/platform
+          sed -i "s|image: ${{ env.IMAGE }}:.*|image: ${{ env.IMAGE }}:${{ github.sha }}|" manifests/auth-app/deployment.yaml
+          git config user.email "ci@homelab.local"
+          git config user.name "CI Bot"
+          git add manifests/auth-app/deployment.yaml
+          git commit -m "deploy auth-app@${{ github.sha }}" || echo "no changes"
+          git push
