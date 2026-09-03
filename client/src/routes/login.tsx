@@ -39,7 +39,7 @@ function Login() {
 		<div className="auth-shell">
 			<form className="auth-card" onSubmit={onSubmit}>
 				<h1>Sign in</h1>
-				<p className="auth-sub">Access & refresh token demo & test the changes</p>
+				<p className="auth-sub">Access & refresh token demo</p>
 
 				<label htmlFor="email">Email</label>
 				<input
