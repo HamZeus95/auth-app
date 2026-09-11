@@ -1,4 +1,15 @@
+// Must be first: registers the global tracer/meter providers before anything
+// else imports @opentelemetry/api and captures a no-op provider.
+import {
+  SERVICE_NAME,
+  SERVICE_VERSION,
+  meterProvider,
+  shutdownTelemetry,
+  tracerProvider,
+} from './telemetry'
+
 import { existsSync } from 'node:fs'
+import { httpInstrumentationMiddleware } from '@hono/otel'
 import { Hono } from 'hono'
 import { serveStatic } from 'hono/bun'
 import { cors } from 'hono/cors'
@@ -6,11 +17,31 @@ import type { ApiResponse } from 'shared'
 import auth from './auth'
 import { migrate } from './db'
 import { env } from './env'
+import { requestLogger } from './logging'
 import { requireAuth, type AuthEnv } from './middleware'
 
 await migrate()
 
 const app = new Hono<AuthEnv>()
+
+// Instrumented at the Hono layer rather than by patching node modules, so it
+// behaves the same under Bun as it would under Node. Produces a server span
+// per request plus the http.server.* metrics the RED dashboard is built on.
+app.use(
+  '*',
+  httpInstrumentationMiddleware({
+    tracerProvider,
+    meterProvider,
+    captureActiveRequests: true,
+    // The middleware stamps its own service_name/service_version metric
+    // attributes and defaults them to empty strings; it does not read them
+    // off the provider's resource. Without these every series is labelled
+    // service_name="" and the dashboard cannot filter by service.
+    serviceName: SERVICE_NAME,
+    serviceVersion: SERVICE_VERSION,
+  }),
+)
+app.use('*', requestLogger)
 
 // `credentials` is required for the httpOnly refresh cookie to travel.
 app.use(
@@ -56,6 +87,14 @@ if (existsSync(CLIENT_DIST)) {
   app.get('*', serveStatic({ path: `${CLIENT_DIST}/index.html` }))
 } else {
   app.get('/', (c) => c.text('API is running. Client bundle not built.'))
+}
+
+// Without this the batch span processor is killed mid-flight on rollout and
+// the final requests never reach Tempo.
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(signal, () => {
+    shutdownTelemetry().finally(() => process.exit(0))
+  })
 }
 
 export default {
