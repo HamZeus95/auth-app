@@ -38,9 +38,20 @@ jobs:
         run: |
           git clone https://x-access-token:${GH_TOKEN}@github.com/HamZeus95/platform.git /tmp/platform
           cd /tmp/platform
-          sed -i "s|image: ${{ env.IMAGE }}:.*|image: ${{ env.IMAGE }}:${{ github.sha }}|" manifests/auth-app/deployment.yaml
+          MANIFEST=manifests/auth-app/base/deployment.yaml
+          test -f "$MANIFEST" || { echo "::error::$MANIFEST missing - platform repo layout changed"; exit 1; }
+          before=$(sha1sum "$MANIFEST" | cut -d' ' -f1)
+          sed -i "s|image: ${{ env.IMAGE }}:.*|image: ${{ env.IMAGE }}:${{ github.sha }}|" "$MANIFEST"
+          after=$(sha1sum "$MANIFEST" | cut -d' ' -f1)
+          # A no-op sed used to be indistinguishable from "already up to date",
+          # so a moved file would silently stop deployments. Fail loudly instead.
+          if [ "$before" = "$after" ]; then
+            grep -q "image: ${{ env.IMAGE }}:${{ github.sha }}" "$MANIFEST" \
+              || { echo "::error::image line did not match in $MANIFEST"; exit 1; }
+            echo "already at ${{ github.sha }}, nothing to push"; exit 0
+          fi
           git config user.email "ci@homelab.local"
           git config user.name "CI Bot"
-          git add manifests/auth-app/deployment.yaml
-          git commit -m "deploy auth-app@${{ github.sha }}" || echo "no changes"
+          git add "$MANIFEST"
+          git commit -m "deploy auth-app@${{ github.sha }}"
           git push
