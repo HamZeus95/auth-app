@@ -38,20 +38,19 @@ jobs:
         run: |
           git clone https://x-access-token:${GH_TOKEN}@github.com/HamZeus95/platform.git /tmp/platform
           cd /tmp/platform
-          MANIFEST=manifests/auth-app/base/deployment.yaml
-          test -f "$MANIFEST" || { echo "::error::$MANIFEST missing - platform repo layout changed"; exit 1; }
-          before=$(sha1sum "$MANIFEST" | cut -d' ' -f1)
-          sed -i "s|image: ${{ env.IMAGE }}:.*|image: ${{ env.IMAGE }}:${{ github.sha }}|" "$MANIFEST"
-          after=$(sha1sum "$MANIFEST" | cut -d' ' -f1)
-          # A no-op sed used to be indistinguishable from "already up to date",
-          # so a moved file would silently stop deployments. Fail loudly instead.
-          if [ "$before" = "$after" ]; then
-            grep -q "image: ${{ env.IMAGE }}:${{ github.sha }}" "$MANIFEST" \
-              || { echo "::error::image line did not match in $MANIFEST"; exit 1; }
-            echo "already at ${{ github.sha }}, nothing to push"; exit 0
-          fi
+          # The overlays' kustomize image transformer is the single source of
+          # truth for the tag; it drives both the Deployment and the seed Job.
+          FILES="manifests/auth-app/overlays/dev/kustomization.yaml manifests/auth-app/overlays/prod/kustomization.yaml"
+          for f in $FILES; do
+            test -f "$f" || { echo "::error::$f missing - platform repo layout changed"; exit 1; }
+            grep -q '^    newTag:' "$f" || { echo "::error::no newTag: line in $f"; exit 1; }
+            sed -i "s|^    newTag: .*|    newTag: ${{ github.sha }}|" "$f"
+          done
           git config user.email "ci@homelab.local"
           git config user.name "CI Bot"
-          git add "$MANIFEST"
+          git add $FILES
+          if git diff --cached --quiet; then
+            echo "already at ${{ github.sha }}, nothing to push"; exit 0
+          fi
           git commit -m "deploy auth-app@${{ github.sha }}"
           git push
