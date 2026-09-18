@@ -13,6 +13,16 @@ import {
 
 const REFRESH_COOKIE = 'refresh_token'
 
+/**
+ * Hashed once at startup so an unknown email costs the same as a known one.
+ *
+ * Verifying only when the row exists lets `||` short-circuit, which skips
+ * argon2 entirely and makes "no such account" answer ~115ms faster than
+ * "wrong password" - a timing oracle that reveals which emails are
+ * registered, even though both paths return an identical 401.
+ */
+const DUMMY_PASSWORD_HASH = await Bun.password.hash('no-such-account-placeholder')
+
 const auth = new Hono<AuthEnv>()
 
 function setRefreshCookie(c: Context<AuthEnv>, token: string) {
@@ -48,9 +58,15 @@ auth.post('/login', async (c) => {
   `
   const row = rows[0]
 
-  // Same response for unknown email and wrong password so the endpoint
-  // doesn't reveal which accounts exist.
-  if (!row || !(await Bun.password.verify(body.password, row.password_hash))) {
+  // Verify unconditionally. Both the response *and* the time it takes must be
+  // identical for a missing account and a wrong password, so the hash is
+  // always computed - against a placeholder when there is no row.
+  const passwordMatches = await Bun.password.verify(
+    body.password,
+    row?.password_hash ?? DUMMY_PASSWORD_HASH,
+  )
+
+  if (!row || !passwordMatches) {
     return c.json({ error: 'Invalid email or password' }, 401)
   }
 
